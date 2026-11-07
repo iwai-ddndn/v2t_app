@@ -1,6 +1,6 @@
 // オフラインでも画面を開けるようにアプリ本体をキャッシュ(API通信はキャッシュしない)
 const CACHE = 'v2t-v1';
-const ASSETS = ['./', 'index.html', 'bench.html', 'css/style.css', 'js/app.js', 'js/audio.js', 'js/pcm-worklet.js', 'js/util.js',
+const ASSETS = ['./', 'index.html', 'bench.html', 'css/style.css', 'js/app.js', 'js/audio.js', 'js/util.js',
   'js/summary.js', 'js/cer.js', 'js/bench.js', 'js/engines/webspeech.js', 'js/engines/openai.js', 'js/engines/soniox.js',
   'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())));

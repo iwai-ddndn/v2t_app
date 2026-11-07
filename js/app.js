@@ -228,6 +228,10 @@ function init() {
   });
   $('#btnExport').onclick = () => download(`会議メモ_${session.created.slice(0, 16).replace(/[:T]/g, '-')}.txt`, toPlainText(session.segments, true));
   $('#btnCopy').onclick = async () => { await navigator.clipboard.writeText(toPlainText(session.segments, true)); setStatus('全文をコピーしました'); };
+  $('#btnLogout').onclick = () => {
+    if (!confirm('この端末のログイン状態を解除しますか?(記録と設定は端末に残ります)')) return;
+    localStorage.removeItem('v2t.gateKey'); sessionStorage.removeItem('v2t.gateKey'); location.href = './';
+  };
   $('#btnClear').onclick = () => {
     if (running) { alert('停止してから消去してください'); return; }
     if (!confirm('現在の記録を履歴に移して、新しい記録を始めますか?')) return;
