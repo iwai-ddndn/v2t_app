@@ -5,6 +5,11 @@
   "scripts": {
     "test": "node --test tests/unit.test.js",
     "e2e": "node tests/e2e.mjs",
-    "serve": "python3 -m http.server 8080"
+    "serve": "python3 -m http.server 8080",
+    "build": "node scripts/build.mjs",
+    "e2e:dist": "node tests/e2e-dist.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
   }
 }

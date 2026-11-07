@@ -1,6 +1,11 @@
 // マイク取得 → 16kHz mono Int16 へ変換 → 購読者へ配信 / リングバッファ保持 / WAV化
 export const TARGET_RATE = 16000;
 
+const WORKLET_SRC = `class PcmTap extends AudioWorkletProcessor {
+  process(inputs) { const ch = inputs[0] && inputs[0][0]; if (ch && ch.length) this.port.postMessage(ch.slice(0)); return true; }
+}
+registerProcessor('pcm-tap', PcmTap);`;
+
 export function downsample(float32, inRate, outRate = TARGET_RATE) {
   if (inRate === outRate) return float32;
   const ratio = inRate / outRate;
@@ -119,7 +124,9 @@ export async function openMic(onFrame) {
   let node;
   const handle = (f32) => onFrame(floatToInt16(downsample(f32, inRate)));
   if (ctx.audioWorklet) {
-    await ctx.audioWorklet.addModule(new URL('./pcm-worklet.js', import.meta.url));
+    // バンドル/暗号化配信でも動くよう、ワークレットはコード文字列から Blob URL で読み込む
+    const workletUrl = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'text/javascript' }));
+    await ctx.audioWorklet.addModule(workletUrl);
     node = new AudioWorkletNode(ctx, 'pcm-tap');
     // 128サンプル単位で来るので 100ms 程度にまとめる
     let acc = []; let accLen = 0; const want = Math.floor(inRate * 0.1);

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#111418">
+<title>会議メモ</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<style>
+  html,body{margin:0;height:100%;background:#111418;color:#e9edf1;font-family:-apple-system,"Hiragino Sans",sans-serif}
+  form{max-width:340px;margin:22vh auto 0;padding:0 20px;display:flex;flex-direction:column;gap:12px}
+  input,button{font:inherit;font-size:17px;padding:12px;border-radius:10px;border:1px solid #2a313a;background:#1b2027;color:#e9edf1}
+  button{background:#ff4d4f;border-color:#ff4d4f;color:#fff;font-weight:700}
+  label{font-size:14px;color:#8b96a3;display:flex;gap:8px;align-items:center}
+  #msg{min-height:1.4em;color:#ff8a8a;font-size:14px}
+</style>
+</head>
+<body>
+<form id="f" autocomplete="off">
+  <h2 style="margin:0">🔒 会議メモ</h2>
+  <input id="pw" type="password" placeholder="パスワード" autocomplete="current-password" autofocus>
+  <label><input id="remember" type="checkbox" checked style="width:auto"> この端末を記憶する</label>
+  <button id="go">開く</button>
+  <div id="msg"></div>
+</form>
+<script id="payload" type="application/json">__PAYLOAD__</script>
+<script>
+(async () => {
+  const P = JSON.parse(document.getElementById('payload').textContent);
+  const ub = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const bu = (u) => btoa(String.fromCharCode(...u));
+  const KEY = 'v2t.gateKey';
+  const msg = (t) => (document.getElementById('msg').textContent = t);
+
+  async function openWithKey(raw) {
+    const k = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub(P.iv) }, k, ub(P.ct));
+    const pages = JSON.parse(new TextDecoder().decode(pt));
+    const html = new URLSearchParams(location.search).has('bench') ? pages.bench : pages.app;
+    document.open(); document.write(html); document.close();
+  }
+  async function unwrap(pw) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw.normalize('NFKC')), 'PBKDF2', false, ['deriveKey']);
+    for (const w of P.wraps) {
+      const kek = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: ub(w.s), iterations: P.iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+      try { return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub(w.i) }, kek, ub(w.c))); } catch {}
+    }
+    return null;
+  }
+
+  const saved = localStorage.getItem(KEY) || sessionStorage.getItem(KEY);
+  if (saved) {
+    try { await openWithKey(ub(saved)); return; } catch { localStorage.removeItem(KEY); sessionStorage.removeItem(KEY); }
+  }
+  document.getElementById('f').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('go'); btn.disabled = true; msg('確認中…');
+    try {
+      const raw = await unwrap(document.getElementById('pw').value);
+      if (!raw) { msg('パスワードが違います'); await new Promise((r) => setTimeout(r, 1500)); return; }
+      (document.getElementById('remember').checked ? localStorage : sessionStorage).setItem(KEY, bu(raw));
+      await openWithKey(raw);
+    } catch (err) { msg('開けませんでした: ' + err.message); }
+    finally { btn.disabled = false; }
+  };
+})();
+</script>
+</body>
+</html>
