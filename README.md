@@ -1,16 +1,18 @@
-# 会議メモ — iPhone 向けリアルタイム文字起こし
+# 会議メモ — リアルタイム文字起こし
 
-会議中に **「今なんて言った?」「さっきの話は何だった?」** をすぐ確認するための Web アプリ(PWA)です。
+会議中に **「今なんて言った?」「さっきの話は何だった?」** にすぐ追いつくための Web アプリ(PWA)です。iPhone でも PC でも使えます。
 
-- 文字起こしの方式を3つから選べます
-  - **無料:iPhone内蔵**: Safari 内蔵の音声認識を使います。0円です。
-  - **OpenAI(高精度)**: gpt-4o-mini-transcribe を使います。1時間あたり約27円ですが、ChatGPT Pro の API クレジットの範囲内なら実質0円です。
-  - **Soniox(即時)**: 遅延1〜2秒で、1時間あたり約20円です。
-- **◀30秒 / 1分 / 3分 / 5分**: その時点までの発言にすぐ戻り、ハイライト表示します。
-- **🔊 聞き直す**: 直近15秒〜3分の音声を再生します(イヤホン推奨)。
-- **🧠 要約**: 直近3分/5分/10分/全体を、AI が「今の話題・要点・決定事項・自分への質問」にまとめます。
-- 記録は端末内に自動保存されます。テキストでの保存・コピー・履歴(30件)にも対応しています。
-- **比較検証ページ(`bench.html`)**: 同じ音声を複数の方式で文字起こしし、CER・速度・費用を比較できます。
+![録音中の画面と「追いつく」シート](docs/screens/overview.png)
+
+- **録音画面**: 発言が下に流れ、最新の数行が一番目立ちます。録音状態・経過時間・入力音量・費用は常に上部に表示されます。
+- **追いつく**: 下部のボタンから開くシートで、直近 30秒/1分/3分/5分 の範囲を選び、「**文字 / 要約 / 音声**」を切り替えて確認できます。「一覧でこの位置を表示」で本体の該当位置にも飛べます。
+- **印をつける**: 「ここ大事」を 1 タップで記録し、あとで履歴から飛べます。
+- **一時停止 → 終了して保存**: 会議 1 回が履歴の 1 件になります。履歴では検索・書き出し・名前の変更・削除(元に戻せる)ができます。
+- **文字起こしの方式**: OpenAI(gpt-transcribe・おすすめ)/ Soniox(ほぼ即時)/ 端末の音声認識(無料)から選べます。
+- **初回セットアップ**: 使い方 → 方式 → API キー → マイクテストの 4 ステップです。
+- **ラボ**(設定の一番下): 同じ録音を複数の方式で文字起こしし、CER・速度・費用を比較できます。
+
+画面設計の考え方(Material Design 3 をもとにした情報設計・操作・デザイントークン)は **[docs/DESIGN.md](docs/DESIGN.md)** にまとめています。
 
 方式ごとの費用と品質の比較、推奨する使い分けは **[docs/EVALUATION.md](docs/EVALUATION.md)** にまとめています。
 
@@ -55,25 +57,28 @@
 5. ⚙ 設定に OpenAI / Soniox の API キーを入れます。キーは Keychain に、記録はアプリ内に保存されます。
 
 ## 開発
-ビルド不要の素の HTML / JavaScript です。
+React 19 + TypeScript + Vite + Tailwind CSS v4 + **shadcn/ui**(Radix UI)で作っています。shadcn/ui のコンポーネントは `src/components/ui/` にあり、Material Design 3 に合わせて調整しています(角丸・状態レイヤー・48px のタッチ領域など)。
 
 ```sh
-npm run serve      # http://localhost:8080
-npm test           # 単体テスト(音声の区切り・リングバッファ・CER・OpenAIの順序保証)
-npm run e2e        # Playwright で疑似マイク+APIモックの E2E テスト
-APP_PASSWORDS=... npm run build && TEST_PASSWORD=... npm run e2e:dist   # 公開ビルドの E2E テスト
+npm install
+npm run dev          # 開発サーバー(http://localhost:5173)
+npm run typecheck    # 型チェック
+npm test             # 単体テスト(音声処理・エンジン・設定/記録の移行など)
+npm run build:app    # build/index.html(1 枚にまとめた HTML)を出力
+npm run e2e          # Playwright で疑似マイク+API モックの E2E テスト(build:app の後)
+APP_PASSWORDS=... npm run build && TEST_PASSWORD=... npm run e2e:dist   # 公開用の暗号化ビルドとそのテスト
 ```
 
-| ファイル | 役割 |
+| 場所 | 役割 |
 |---|---|
-| `js/audio.js` | マイク入力 → 16kHz PCM、リングバッファ、無音で区切るチャンカー、WAV 化 |
-| `js/engines/webspeech.js` | 内蔵認識(iOS 向けの自動再起動・強制確定つき) |
-| `js/engines/openai.js` | OpenAI 文字起こし API(区間を並列送信し、順序を保って表示。再送あり) |
-| `js/engines/soniox.js` | Soniox WebSocket ストリーミング(話者分離あり) |
-| `js/app.js` | 画面・巻き戻し・聞き直し・要約・保存 |
-| `js/bench.js` / `bench.html` | 方式の比較検証 |
-| `scripts/build.mjs` / `scripts/gate.html` | 公開用の暗号化ビルドとパスワード画面 |
-| `ios/` | ネイティブ版(SwiftUI。`project.yml` から XcodeGen でプロジェクトを生成) |
+| `src/screens/` | 画面(録音 / 履歴 / 設定 / ラボ / 初回セットアップ) |
+| `src/components/` | 追いつくシート・書き起こし一覧・方式の選択・音量メーターなど |
+| `src/components/ui/` | shadcn/ui のコンポーネント(M3 向けに調整) |
+| `src/store/` | 状態管理(zustand): 設定・記録・録音の制御 |
+| `src/lib/audio.ts` | マイク / PC 音声の取り込み、適応 VAD、音量の正規化、区切り、リングバッファ |
+| `src/lib/engines/` | OpenAI / Soniox / 端末の音声認識 |
+| `scripts/build.mjs`, `scripts/gate.html` | 公開用の暗号化ビルドとパスワード画面 |
+| `ios/` | ネイティブ版(SwiftUI) |
 
 ### ブラウザから OpenAI API に直接つながらない場合
 社内ネットワークなどでつながらない場合は、Cloudflare Workers などで簡単なプロキシを立て、設定の「API Base URL」にそのアドレスを入れてください。

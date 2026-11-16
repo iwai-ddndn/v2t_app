@@ -19,17 +19,19 @@ jobs:
         with: { node-version: 22 }
       - run: npm ci
       - run: npm test
+      - run: npm run build:app
       # パスワードは Settings → Secrets → Actions の APP_PASSWORDS(カンマ区切りで複数可)。
       # 未設定なら、リポジトリに入っている暗号化済み dist/ をそのまま使う。
       - name: Build encrypted bundle
         env: { APP_PASSWORDS: "${{ secrets.APP_PASSWORDS }}" }
         run: |
-          if [ -n "$APP_PASSWORDS" ]; then node scripts/build.mjs; else echo "APP_PASSWORDS 未設定: コミット済みの dist/ を使用"; fi
+          if [ -n "$APP_PASSWORDS" ]; then node scripts/build.mjs; else echo "::warning::APP_PASSWORDS 未設定: コミット済みの dist/ を使用(アプリの更新は反映されません)"; fi
       # 安全装置: 暗号化ゲート以外は絶対に公開しない
       - name: Verify only encrypted gate is published
         run: |
           grep -q '"wraps"' dist/index.html
-          ! grep -qE 'api\.openai\.com|soniox|transcriptions' dist/index.html
+          # 暗号文(base64)の部分を除いて、平文のコードが混ざっていないかを調べる
+          ! sed '/<script id="payload"/,/<\/script>/d' dist/index.html | grep -qE 'api\.openai\.com|soniox|transcriptions|追いつく'
           test "$(ls dist | sort | tr '\n' ' ')" = "icons index.html manifest.webmanifest robots.txt sw.js "
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

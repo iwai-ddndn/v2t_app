@@ -1,129 +1,18 @@
 <!doctype html>
 <html lang="ja">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#111418">
-<title>会議メモ - リアルタイム文字起こし</title>
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
-<link rel="stylesheet" href="css/style.css">
-</head>
-<body>
-<header class="top">
-  <select id="engine" aria-label="文字起こし方式"></select>
-  <span id="clock" class="clock">00:00</span>
-  <span id="cost" class="cost" title="推定API費用">¥0</span>
-  <button id="btnSettings" class="icon" aria-label="設定">⚙︎</button>
-</header>
-
-<div class="statusbar">
-  <div class="meter" title="入力音量(緑=発話として検出中)"><div id="meterBar"></div></div>
-  <div id="status" class="status">停止中</div>
-</div>
-
-<main id="list" class="list" aria-live="polite">
-  <p class="empty">「● 開始」で録音と文字起こしを始めます。<br>下の「◀ 1分前」などで直前の発言にすぐ戻れます。</p>
-</main>
-<div id="interim" class="interim"></div>
-<button id="toLatest" class="to-latest" hidden>最新へ ↓</button>
-
-<footer class="bottom">
-  <div class="rewind">
-    <button data-back="30">◀ 30秒</button>
-    <button data-back="60">◀ 1分</button>
-    <button data-back="180">◀ 3分</button>
-    <button data-back="300">◀ 5分</button>
-  </div>
-  <div class="actions">
-    <button id="btnListen" title="直近の音声をイヤホンで聞き直す">🔊 聞き直す</button>
-    <button id="btnStart" class="primary">● 開始</button>
-    <button id="btnSummary" title="直近の内容をAIで要約">🧠 要約</button>
-  </div>
-</footer>
-
-<dialog id="dlgSummary">
-  <form method="dialog">
-    <h3>直近の要約</h3>
-    <div class="row">
-      <label>範囲 <select id="sumRange"><option value="180">直近3分</option><option value="300" selected>直近5分</option><option value="600">直近10分</option><option value="0">全体</option></select></label>
-      <button type="button" id="btnDoSummary" class="primary">要約する</button>
-    </div>
-    <div id="summaryOut" class="summary-out"></div>
-    <button value="close">閉じる</button>
-  </form>
-</dialog>
-
-<dialog id="dlgListen">
-  <form method="dialog">
-    <h3>直近の音声を聞き直す</h3>
-    <p class="hint">イヤホン推奨。録音は続いたまま再生されます。</p>
-    <div class="row wrap">
-      <button type="button" data-play="15">15秒</button>
-      <button type="button" data-play="30">30秒</button>
-      <button type="button" data-play="60">1分</button>
-      <button type="button" data-play="180">3分</button>
-      <button type="button" id="btnStopPlay">■ 停止</button>
-    </div>
-    <button value="close">閉じる</button>
-  </form>
-</dialog>
-
-<dialog id="dlgSettings">
-  <form method="dialog" id="formSettings">
-    <h3>設定</h3>
-    <fieldset><legend>音声の取り込み</legend>
-      <label>音源 <select name="inputSource">
-        <option value="mic">マイク・加工なし(スピーカー越し・会議室向け)</option>
-        <option value="mic-voice">マイク・ノイズ抑制あり(自分の声中心)</option>
-        <option value="pc">PCの音声を直接(PCのChrome/Edge・最高精度)</option>
-        <option value="pc+mic">PCの音声 + マイク(自分の声も残す)</option>
-      </select></label>
-      <label class="check"><input name="normalize" type="checkbox"> 小さい声を自動で大きくする(推奨)</label>
-      <label>用語・固有名詞(「、」か改行で区切る)
-        <textarea name="glossary" rows="3" placeholder="例: 岩井、DDN、v2t、四半期レビュー、KPI"></textarea></label>
-      <p class="hint">「PCの音声」を選ぶと、開始時に共有する画面(会議のタブなど)を聞かれます。「音声を共有」をオンにしてください。スピーカー→マイクを経由しないので、最も正確です。</p>
-    </fieldset>
-    <fieldset><legend>OpenAI(ChatGPT Pro の API クレジット特典が使えます)</legend>
-      <label>APIキー <input name="openaiKey" type="password" autocomplete="off" placeholder="sk-..."></label>
-      <label>文字起こしモデル <select name="openaiModel">
-        <option value="gpt-transcribe">gpt-transcribe($0.0045/分・最新・推奨)</option>
-        <option value="gpt-4o-transcribe">gpt-4o-transcribe($0.006/分)</option>
-        <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe($0.003/分・最安)</option>
-        <option value="whisper-1">whisper-1($0.006/分・旧)</option>
-      </select></label>
-      <label>区切り 最短/最長(秒) <span class="row"><input name="chunkMin" type="number" min="3" max="30"> <input name="chunkMax" type="number" min="5" max="60"></span></label>
-      <label>要約モデル <input name="summaryModel" placeholder="gpt-5-mini"></label>
-      <label>API Base URL(プロキシ利用時のみ) <input name="openaiBaseUrl" placeholder="https://api.openai.com/v1"></label>
-    </fieldset>
-    <fieldset><legend>Soniox(最安・ストリーミング)</legend>
-      <label>APIキー <input name="sonioxKey" type="password" autocomplete="off"></label>
-      <label>モデル <input name="sonioxModel" placeholder="stt-rt-v5"></label>
-      <label class="check"><input name="diarize" type="checkbox"> 話者分離(話者ごとに改行)</label>
-    </fieldset>
-    <fieldset><legend>表示・その他</legend>
-      <label>文字サイズ(px) <input name="fontSize" type="number" min="12" max="32"></label>
-      <label>聞き直し用に保持する音声(分) <input name="ringMinutes" type="number" min="1" max="30"></label>
-      <label>為替(円/ドル) <input name="yenPerUsd" type="number" min="50" max="400"></label>
-      <label>言語 <select name="lang"><option value="ja-JP">日本語</option><option value="en-US">English</option></select></label>
-    </fieldset>
-    <fieldset><legend>履歴</legend>
-      <div class="row wrap">
-        <button type="button" id="btnExport">テキスト保存</button>
-        <button type="button" id="btnCopy">全文コピー</button>
-        <button type="button" id="btnClear">現在の記録を消去</button>
-        <a href="bench.html" class="btn">方式の比較検証ページへ</a>
-        <button type="button" id="btnLogout">この端末からログアウト</button>
-      </div>
-      <ul id="history" class="history"></ul>
-    </fieldset>
-    <p class="hint">APIキーはこの端末のブラウザ内(localStorage)にのみ保存され、各社APIへ直接送信されます。</p>
-    <button value="close" class="primary">保存して閉じる</button>
-  </form>
-</dialog>
-
-<script type="module" src="js/app.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#FEF7FF" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141218" media="(prefers-color-scheme: dark)" />
+    <title>会議メモ</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
