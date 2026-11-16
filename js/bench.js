@@ -1,5 +1,5 @@
-import { decodeFileTo16k, Chunker, encodeWav, TARGET_RATE } from './audio.js';
-import { transcribeWav, MODELS, cleanup } from './engines/openai.js';
+import { decodeFileTo16k, Chunker, encodeWav, normalizeGain, TARGET_RATE } from './audio.js';
+import { transcribeWav, MODELS, cleanup, parseGlossary } from './engines/openai.js';
 import * as Soniox from './engines/soniox.js';
 import { cer } from './cer.js';
 
@@ -34,9 +34,9 @@ $('#exportJson').onclick = () => {
 };
 
 // ライブと同じ区切り方でチャンク化し、OpenAI に送る(並列3本)
-async function runOpenAI(model) {
+async function runOpenAI(model, { raw = false } = {}) {
   const chunks = [];
-  const ch = new Chunker({ minSec: Number(settings.chunkMin || 8), maxSec: Number(settings.chunkMax || 20), onChunk: (p, s) => chunks.push({ p, s }) });
+  const ch = new Chunker({ minSec: Number(settings.chunkMin || 8), maxSec: Number(settings.chunkMax || 20), onChunk: (p, s, m) => chunks.push({ p, s, m }) });
   for (let i = 0; i < pcm.length; i += 1600) ch.push(pcm.subarray(i, i + 1600));
   ch.flush();
   const out = new Array(chunks.length); const lat = [];
@@ -44,18 +44,22 @@ async function runOpenAI(model) {
   // 前チャンク末尾をプロンプトに使うため順次実行(ライブ時と同条件)
   for (const c of chunks) {
     const t0 = performance.now();
-    const text = await transcribeWav(encodeWav(c.p), { apiKey: settings.openaiKey, model, lang: (settings.lang || 'ja-JP').slice(0, 2), prompt: context, baseUrl: settings.openaiBaseUrl });
+    const text = await transcribeWav(encodeWav(raw ? c.p : normalizeGain(c.p)), {
+      apiKey: settings.openaiKey, model, lang: (settings.lang || 'ja-JP').slice(0, 2), prompt: context,
+      keywords: raw ? [] : parseGlossary(settings.glossary), baseUrl: settings.openaiBaseUrl,
+    });
     lat.push((performance.now() - t0) / 1000);
-    out[next++] = cleanup(text); context = (context + text).slice(-200);
+    const cleaned = raw ? text : cleanup(text, c.m);
+    out[next++] = cleaned; context = (context + cleaned).slice(-200);
     log(`${model}: ${next}/${chunks.length}`);
   }
   const sentSec = chunks.reduce((a, c) => a + c.p.length, 0) / TARGET_RATE;
   return { text: out.join('\n'), usd: (sentSec / 60) * MODELS[model].costPerMin, latency: avg(lat), chunks: chunks.length };
 }
 
-async function runSoniox() {
+async function runSoniox({ raw = false } = {}) {
   let text = '';
-  const eng = Soniox.create(settings, {
+  const eng = Soniox.create(raw ? { ...settings, normalize: false, glossary: '' } : settings, {
     offset: 0, now: () => 0,
     onSegment: (s) => { text += `${s.speaker != null ? `話者${s.speaker}: ` : ''}${s.text}\n`; },
     onInterim: () => {}, onStatus: (m) => log(m), onError: (e) => log(e.message), onUsage: () => {},
@@ -77,12 +81,15 @@ $('#run').onclick = async () => {
     const t0 = performance.now();
     try {
       let r;
+      const raw = p.endsWith(':raw');
+      const suffix = raw ? '(前処理なし)' : '(前処理あり)';
       if (p.startsWith('openai:')) {
         if (!settings.openaiKey) throw new Error('OpenAI APIキー未設定');
-        r = await runOpenAI(p.split(':')[1]); r.name = MODELS[p.split(':')[1]].name;
+        const model = p.split(':')[1];
+        r = await runOpenAI(model, { raw }); r.name = MODELS[model].name + suffix;
       } else {
         if (!settings.sonioxKey) throw new Error('Soniox APIキー未設定');
-        r = await runSoniox(); r.name = `Soniox ${settings.sonioxModel || 'stt-rt-v5'}`;
+        r = await runSoniox({ raw }); r.name = `Soniox ${settings.sonioxModel || 'stt-rt-v5'}${suffix}`;
       }
       r.sec = (performance.now() - t0) / 1000;
       results.push(r); render();

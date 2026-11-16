@@ -14,6 +14,8 @@
 
 方式ごとの費用と品質の比較、推奨する使い分けは **[docs/EVALUATION.md](docs/EVALUATION.md)** にまとめています。
 
+**精度を上げるコツ**(PC のスピーカーから流れる会議を録る場合など)と、既存研究にもとづく改善の内容は **[docs/ACCURACY.md](docs/ACCURACY.md)** にまとめています。一番効くのは、PC のブラウザで開いて音源を「**PCの音声を直接**」にすることです。
+
 ## 2つの版
 | | Web版(PWA) | ネイティブ版(iOSアプリ, `ios/`) |
 |---|---|---|
@@ -44,7 +46,7 @@
 - 手元でビルドする場合は `APP_PASSWORDS="..." npm run build` を実行します。
 
 ## ネイティブ版(iOS アプリ)のインストール
-Mac が必要です(Windows では iOS アプリをビルドできません)。
+詳しい手順・動作確認チェックリスト・困ったときの対処は **[docs/NATIVE_APP_GUIDE.md](docs/NATIVE_APP_GUIDE.md)** にあります。以下は要約です。Mac が必要です(Windows では iOS アプリをビルドできません)。
 1. Mac に Xcode(無料)と XcodeGen をインストールします: `brew install xcodegen`
 2. `cd ios && xcodegen generate && open V2T.xcodeproj`
 3. Xcode → Settings → Accounts で Apple ID を追加します。ターゲット V2T → Signing & Capabilities → Team で自分を選び、Bundle Identifier を一意の名前(例: `com.あなたの名前.v2t`)に変えます。

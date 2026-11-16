@@ -194,12 +194,20 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle("小さい声を自動で大きくする(推奨)", isOn: $settings.normalize)
+                    TextField("用語・固有名詞(「、」区切り。人名・社名・専門用語など)", text: $settings.glossary, axis: .vertical)
+                        .lineLimit(2...5).autocorrectionDisabled()
+                } header: { Text("音声・認識のヒント") } footer: {
+                    Text("PCのスピーカーから流れる会議は、iPhoneをスピーカーの近く(30cm以内が目安)に置くと精度が上がります。")
+                }
                 Section("OpenAI(ChatGPT Pro の API クレジットが使えます)") {
                     SecureField("APIキー sk-...", text: $settings.openaiKey).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Picker("文字起こしモデル", selection: $settings.openaiModel) {
-                        Text("gpt-4o-mini-transcribe($0.003/分)").tag("gpt-4o-mini-transcribe")
+                        Text("gpt-transcribe($0.0045/分・最新・推奨)").tag("gpt-transcribe")
                         Text("gpt-4o-transcribe($0.006/分)").tag("gpt-4o-transcribe")
-                        Text("whisper-1($0.006/分)").tag("whisper-1")
+                        Text("gpt-4o-mini-transcribe($0.003/分・最安)").tag("gpt-4o-mini-transcribe")
+                        Text("whisper-1($0.006/分・旧)").tag("whisper-1")
                     }
                     Stepper("区切り 最短 \(Int(settings.chunkMin))秒", value: $settings.chunkMin, in: 3...30)
                     Stepper("区切り 最長 \(Int(settings.chunkMax))秒", value: $settings.chunkMax, in: 5...60)
