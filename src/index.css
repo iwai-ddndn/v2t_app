@@ -113,7 +113,14 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Segoe UI", Meiryo, sans-serif;
+  /*
+   * 日本語フォントを明示する(指定がないと、環境によって中国語の字形のフォントが使われる)。
+   * 欧文は各 OS のシステムフォント、和文は OS ごとの日本語フォントを優先順に並べる。
+   *   Apple: ヒラギノ / Windows: 游ゴシック UI・BIZ UDPゴシック・メイリオ / Android・Linux: Noto Sans CJK JP・IPA
+   */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", "Noto Sans CJK JP", "Source Han Sans JP", "Yu Gothic UI", "BIZ UDPGothic", "Meiryo UI", Meiryo,
+    "Segoe UI", "IPAexGothic", "IPAGothic", "IPAPGothic", sans-serif;
 }
 
 @layer base {
@@ -122,6 +129,11 @@
   }
   html, body, #root {
     height: 100%;
+  }
+  html {
+    /* 日本語フォントの指定をページ全体に適用する */
+    font-family: var(--font-sans);
+    -webkit-text-size-adjust: 100%;
   }
   body {
     @apply bg-background text-foreground antialiased;
