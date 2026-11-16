@@ -17,14 +17,16 @@ const check = (c, m) => { console.log(`${c ? 'ok  ' : 'FAIL'} ${m}`); if (!c) fa
 const CORS = { 'access-control-allow-origin': '*' };
 
 const html = fs.readFileSync(`${dist}/index.html`, 'utf8');
-check(!/openai\.com|soniox|聞き直す|transcriptions/.test(html), '公開HTMLに本体のコードが平文で含まれない');
+// 暗号文(base64)の中は偶然の文字列一致があり得るので、それ以外の部分だけを調べる
+const outside = html.replace(/<script id="payload"[\s\S]*?<\/script>/, '');
+check(html.includes('"wraps"') && !/openai\.com|soniox|追いつく|transcriptions|radix/i.test(outside), '公開HTMLに本体のコードが平文で含まれない');
 
 const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
 try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['microphone'] });
   const p = await ctx.newPage();
   p.on('pageerror', (e) => { console.log('pageerror', e.message); failed++; });
-  await p.addInitScript(() => { if (!localStorage.getItem('v2t.settings')) localStorage.setItem('v2t.settings', JSON.stringify({ engine: 'openai', openaiKey: 'sk-test', chunkMin: 1, chunkMax: 2 })); });
+  await p.addInitScript(() => { if (!localStorage.getItem('v2t.settings')) localStorage.setItem('v2t.settings', JSON.stringify({ onboarded: true, settingsVersion: 3, engine: 'openai', openaiKey: 'sk-test', chunkMin: 1, chunkMax: 2 })); });
   let n = 0;
   await p.route('https://api.openai.com/v1/audio/transcriptions', (r) => r.fulfill({ json: { text: `公開版${++n}` }, headers: CORS }));
   const url = `http://localhost:${PORT}/`;
@@ -37,27 +39,24 @@ try {
 
   await p.fill('#pw', PW);
   await p.click('#go');
-  await p.waitForSelector('#btnStart', { timeout: 15000 });
+  await p.getByRole('button', { name: '録音を開始' }).waitFor({ timeout: 15000 });
   check(true, '正しいパスワードで本体が開く');
-  await p.click('#btnStart');
-  await p.waitForSelector('.seg', { timeout: 15000 });
-  check((await p.textContent('.seg span')) === '公開版1', '公開版でも録音→文字起こしが動く(ワークレット含む)');
-  await p.click('#btnStart');
-  await p.waitForFunction(() => document.querySelector('#btnStart').textContent.includes('再開'));
+  await p.getByRole('button', { name: '録音を開始' }).click();
+  await p.waitForSelector('[data-t]', { timeout: 15000 });
+  check((await p.locator('[data-t] p').first().textContent()) === '公開版1', '公開版でも録音→文字起こしが動く(ワークレット含む)');
+  await p.getByRole('button', { name: '一時停止' }).click();
+  await p.getByRole('button', { name: '再開' }).waitFor();
 
   await p.goto(url);
-  await p.waitForSelector('#btnStart', { timeout: 15000 });
-  check((await p.$$('.seg')).length >= 1, '記憶した端末ではパスワード不要・記録も残る');
+  await p.getByRole('button', { name: '再開' }).waitFor({ timeout: 15000 });
+  check((await p.locator('[data-t]').count()) >= 1, '記憶した端末ではパスワード不要・記録も残る');
 
   await p.goto(`${url}?bench`);
-  await p.waitForSelector('#run', { timeout: 15000 });
-  check(true, '比較検証ページも開ける');
+  await p.getByRole('heading', { name: 'ラボ: 方式の比較' }).waitFor({ timeout: 15000 });
+  check(true, '旧版の比較ページの URL は新しいラボ画面へ');
 
-  await p.goto(url);
-  await p.waitForSelector('#btnSettings');
-  await p.click('#btnSettings');
-  p.once('dialog', (d) => d.accept());
-  await p.click('#btnLogout');
+  await p.goto(`${url}#/settings`);
+  await p.getByRole('button', { name: 'この端末からログアウト' }).click();
   await p.waitForSelector('#pw', { timeout: 15000 });
   check(true, 'ログアウトでパスワード画面に戻る');
 } finally {

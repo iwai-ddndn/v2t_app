@@ -6,7 +6,6 @@
 // ・パスワードごとに同じ「本体の鍵」を包むので、複数人に別々のパスワードを配れる。
 //   誰かを外すときは、その人のパスワードを外して再ビルドする(本体の鍵も毎回作り直すので古い鍵は無効)。
 // ・文字起こし内容や API キーはサーバーに一切置かれない(各端末内のみ)。
-import { build } from 'esbuild';
 import { webcrypto as crypto } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,25 +21,10 @@ if (passwords.some((p) => p.length < 12)) { console.error('パスワードは12�
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const b64 = (u8) => Buffer.from(u8).toString('base64');
 
-async function bundle(entry) {
-  const r = await build({ entryPoints: [path.join(ROOT, entry)], bundle: true, format: 'iife', minify: true, write: false, target: ['safari15'] });
-  return r.outputFiles[0].text;
-}
-
-function inline(html, js, css) {
-  const out = html
-    .replace(/<link rel="stylesheet" href="css\/style.css">/, () => `<style>${css}</style>`)
-    .replace(/<script type="module" src="js\/(app|bench)\.js"><\/script>/, () => `<script>${js}</script>`)
-    .replace(/href="bench\.html"/g, 'href="./?bench"');
-  if (out.includes('src="js/')) throw new Error('script の置換に失敗');
-  return out;
-}
-
-const css = read('css/style.css');
-const pages = {
-  app: inline(read('index.html'), await bundle('js/app.js'), css),
-  bench: inline(read('bench.html'), await bundle('js/bench.js'), css),
-};
+// Vite が 1 枚にまとめた HTML(npm run build:app の出力)を丸ごと暗号化する
+const appHtml = read('build/index.html');
+if (!appHtml.includes('<script')) throw new Error('build/index.html がありません。先に npm run build:app を実行してください');
+const pages = { app: appHtml };
 
 // 本体の鍵で暗号化
 const contentKeyRaw = crypto.getRandomValues(new Uint8Array(32));
@@ -66,6 +50,6 @@ fs.mkdirSync(path.join(OUT, 'icons'), { recursive: true });
 fs.writeFileSync(path.join(OUT, 'index.html'), gate);
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 fs.writeFileSync(path.join(OUT, 'robots.txt'), 'User-agent: *\nDisallow: /\n');
-for (const f of ['manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
+for (const f of ['manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png']) fs.copyFileSync(path.join(ROOT, 'public', f), path.join(OUT, f));
 fs.writeFileSync(path.join(OUT, 'sw.js'), read('scripts/sw.dist.js'));
 console.log(`dist/ を出力しました(パスワード ${passwords.length} 件, 本体 ${(ct.length / 1024).toFixed(0)} KB)`);

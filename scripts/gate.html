@@ -40,8 +40,9 @@
     const k = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
     const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ub(P.iv) }, k, ub(P.ct));
     const pages = JSON.parse(new TextDecoder().decode(pt));
-    const html = new URLSearchParams(location.search).has('bench') ? pages.bench : pages.app;
-    document.open(); document.write(html); document.close();
+    // 旧版の比較ページ(?bench)は新版のラボ画面へ
+    if (new URLSearchParams(location.search).has('bench')) history.replaceState(null, '', location.pathname + '#/lab');
+    document.open(); document.write(pages.app); document.close();
   }
   async function unwrap(pw) {
     const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw.normalize('NFKC')), 'PBKDF2', false, ['deriveKey']);

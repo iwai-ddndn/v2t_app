@@ -1,0 +1,168 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Material Design 3 のベースラインカラースキームを shadcn/ui の CSS 変数に割り当てる。
+ *   background=surface / card=surface-container-low / popover=surface-container
+ *   muted=surface-container-high / accent=surface-container-highest
+ *   secondary=secondary-container / border=outline-variant / destructive=error
+ */
+:root {
+  --radius: 12px;
+  --background: #fef7ff;
+  --foreground: #1d1b20;
+  --card: #f7f2fa;
+  --card-foreground: #1d1b20;
+  --popover: #f3edf7;
+  --popover-foreground: #1d1b20;
+  --primary: #6750a4;
+  --primary-foreground: #ffffff;
+  --primary-container: #eaddff;
+  --on-primary-container: #21005d;
+  --secondary: #e8def8;
+  --secondary-foreground: #1d192b;
+  --muted: #ece6f0;
+  --muted-foreground: #49454f;
+  --accent: #e6e0e9;
+  --accent-foreground: #1d1b20;
+  --destructive: #b3261e;
+  --destructive-foreground: #ffffff;
+  --error-container: #f9dedc;
+  --on-error-container: #410e0b;
+  --border: #cac4d0;
+  --outline: #79747e;
+  --input: #79747e;
+  --ring: #6750a4;
+  --surface-container: #f3edf7;
+  --inverse-surface: #322f35;
+  --inverse-on-surface: #f5eff7;
+  --scrim: rgb(0 0 0 / 0.32);
+  --success: #146c2e;
+}
+
+.dark {
+  --background: #141218;
+  --foreground: #e6e0e9;
+  --card: #1d1b20;
+  --card-foreground: #e6e0e9;
+  --popover: #211f26;
+  --popover-foreground: #e6e0e9;
+  --primary: #d0bcff;
+  --primary-foreground: #381e72;
+  --primary-container: #4f378b;
+  --on-primary-container: #eaddff;
+  --secondary: #4a4458;
+  --secondary-foreground: #e8def8;
+  --muted: #2b2930;
+  --muted-foreground: #cac4d0;
+  --accent: #36343b;
+  --accent-foreground: #e6e0e9;
+  --destructive: #f2b8b5;
+  --destructive-foreground: #601410;
+  --error-container: #8c1d18;
+  --on-error-container: #f9dedc;
+  --border: #49454f;
+  --outline: #938f99;
+  --input: #938f99;
+  --ring: #d0bcff;
+  --surface-container: #211f26;
+  --inverse-surface: #e6e0e9;
+  --inverse-on-surface: #322f35;
+  --success: #6dd58c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-container: var(--primary-container);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-error-container: var(--error-container);
+  --color-on-error-container: var(--on-error-container);
+  --color-border: var(--border);
+  --color-outline: var(--outline);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface-container: var(--surface-container);
+  --color-inverse-surface: var(--inverse-surface);
+  --color-inverse-on-surface: var(--inverse-on-surface);
+  --color-success: var(--success);
+
+  /* M3 shape scale: small 8 / medium 12 / large 16 / extra-large 28 */
+  --radius-sm: 8px;
+  --radius-md: var(--radius);
+  --radius-lg: 16px;
+  --radius-xl: 28px;
+
+  /* M3 motion */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Segoe UI", Meiryo, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+}
+
+/* M3 の状態レイヤー: hover 8% / pressed 10% を currentColor で重ねる */
+@utility state-layer {
+  position: relative;
+  isolation: isolate;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    transition: opacity 150ms var(--ease-standard);
+    pointer-events: none;
+    z-index: -1;
+  }
+  @media (hover: hover) {
+    &:hover::after { opacity: 0.08; }
+  }
+  &:active::after { opacity: 0.1; }
+}
+
+@utility pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
