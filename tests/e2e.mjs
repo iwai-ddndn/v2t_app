@@ -2,7 +2,7 @@
 import { createRequire } from 'node:module';
 import { spawn, execSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
-const { chromium } = require(execSync('npm root -g').toString().trim() + '/playwright');
+const { chromium, devices } = require(execSync('npm root -g').toString().trim() + '/playwright');
 
 const PORT = 8765;
 const server = spawn('python3', ['-m', 'http.server', String(PORT)], { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore' });
@@ -121,6 +121,48 @@ try {
     await p.waitForTimeout(300);
     check((await p.$$('.seg')).length === 1, 'WebSpeech: 停止時に重複しない');
     await p.context().close();
+  }
+  // 5) PC音声の直接取り込み(getDisplayMedia をモック)+ 用語ヒント + 音量メーター
+  {
+    const p = await page({ engine: 'openai', openaiKey: 'sk-test', chunkMin: 1, chunkMax: 2, inputSource: 'pc', glossary: '岩井、KPI', settingsVersion: 2 }, () => {
+      window.__display = 0;
+      navigator.mediaDevices.getDisplayMedia = async () => {
+        window.__display++;
+        const a = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const c = document.createElement('canvas'); const v = c.captureStream(1);
+        return new MediaStream([...a.getAudioTracks(), ...v.getVideoTracks()]);
+      };
+    });
+    const forms = [];
+    await p.route('https://api.openai.com/v1/audio/transcriptions', (r) => {
+      const body = r.request().postData() || '';
+      forms.push({ langs: body.includes('name="languages[]"'), kw: body.includes('岩井') && body.includes('name="keywords[]"'), model: /name="model"\r\n\r\ngpt-transcribe/.test(body) });
+      return r.fulfill({ json: { text: 'PC音声の文字起こし' }, headers: CORS });
+    });
+    await p.goto(`http://localhost:${PORT}/`);
+    await p.click('#btnStart');
+    await p.waitForSelector('.seg', { timeout: 15000 });
+    check(await p.evaluate(() => window.__display) === 1, 'PC音声モード: 画面共有(音声)を要求する');
+    check(forms[0] && forms[0].model && forms[0].langs && forms[0].kw, `gpt-transcribe に languages[] と用語(keywords[])を送る ${JSON.stringify(forms[0])}`);
+    const w = await p.evaluate(() => parseFloat(document.querySelector('#meterBar').style.width));
+    check(w > 0, `音量メーターが動く (${w}%)`);
+    await p.click('#btnStart');
+    await p.waitForFunction(() => document.querySelector('#btnStart').textContent.includes('再開'));
+    await p.context().close();
+  }
+  // 6) iPhone では PC音声の選択肢を選べない / 旧設定(v1)の移行
+  {
+    const ctx = await browser.newContext({ ...devices['iPhone 13'] });
+    const p = await ctx.newPage();
+    await p.addInitScript(() => localStorage.setItem('v2t.settings', JSON.stringify({ engine: 'openai', openaiModel: 'gpt-4o-mini-transcribe' })));
+    await p.goto(`http://localhost:${PORT}/`);
+    await p.click('#btnSettings');
+    const dis = await p.$$eval('select[name=inputSource] option[value^="pc"]', (os) => os.every((o) => o.disabled));
+    check(dis, 'iPhone: PC音声の選択肢は無効');
+    const st = await p.evaluate(() => JSON.parse(localStorage.getItem('v2t.settings')));
+    check(st.openaiModel === 'gpt-transcribe' && st.inputSource === 'mic' && st.normalize === true, `旧設定を新しい既定値へ移行 (${st.openaiModel}, ${st.inputSource})`);
+    if (shot) await p.screenshot({ path: `${shot}/settings-iphone.png`, fullPage: false });
+    await ctx.close();
   }
   // 4) 比較ページ
   {

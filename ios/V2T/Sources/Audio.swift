@@ -51,31 +51,134 @@ final class RingBuffer {
     }
 }
 
-/// 無音位置で区切る(minSec 以上たまったら無音で区切り、maxSec で強制区切り)
-final class Chunker {
-    let minSec: Double, maxSec: Double, silenceSec = 0.5, silenceRms = 0.012
-    private var parts: [Int16] = []
-    private var silent = 0
-    private var startSample = 0
-    let onChunk: ([Int16], Double) -> Void
+func dbfs(_ r: Double) -> Double { 20 * log10(max(r, 1e-6)) }
 
-    init(minSec: Double, maxSec: Double, onChunk: @escaping ([Int16], Double) -> Void) {
+/// 適応型の発話検出。ノイズフロア = 直近5秒の 100ms ごとの音量の最小値(Minimum Statistics の簡易版)。
+/// 固定しきい値と違い、スピーカー越しの小さな声も「雑音より 8dB 以上大きい」なら発話として扱う。
+final class Vad {
+    private var win: [Double] = []
+    private let winLen = 50, marginDb = 8.0, absMinDb = -65.0, hangFrames = 3
+    private var hang = 0
+    func push(_ s: [Int16]) -> (speech: Bool, levelDb: Double) {
+        let lv = dbfs(rms(s))
+        win.append(lv)
+        if win.count > winLen { win.removeFirst() }
+        let floor = max(-90, win.min() ?? -90)
+        let raw = lv > floor + marginDb && lv > absMinDb
+        if raw { hang = hangFrames } else if hang > 0 { hang -= 1 }
+        return (raw || hang > 0, lv)
+    }
+}
+
+/// 80Hz ハイパス(線形処理なので認識を邪魔する歪みを生まない)
+struct HighPass {
+    private let a: Double
+    private var px = 0.0, py = 0.0
+    init(cutoff: Double = 80) { let rc = 1 / (2 * Double.pi * cutoff); a = rc / (rc + 1 / sampleRate) }
+    mutating func process(_ x: [Double]) -> [Double] {
+        var out = [Double](repeating: 0, count: x.count)
+        for i in 0..<x.count { py = a * (py + x[i] - px); px = x[i]; out[i] = py }
+        return out
+    }
+}
+
+private func toInt16(_ v: Double) -> Int16 {
+    let c = max(-1, min(1, v))
+    return Int16(c < 0 ? c * 32768 : c * 32767)
+}
+
+/// 区間単位の音量正規化: 話している部分の音量を約 -20dBFS に(最大 +26dB)。ピークは 0.95 まで。
+func normalizeGain(_ pcm: [Int16], targetRms: Double = 0.1, maxGain: Double = 20) -> [Int16] {
+    if pcm.isEmpty { return pcm }
+    var hp = HighPass()
+    let f = hp.process(pcm.map { Double($0) / 32768 })
+    var pw: [Double] = []
+    var i = 0
+    while i < f.count {
+        let e = min(f.count, i + 1600)
+        var s = 0.0
+        for j in i..<e { s += f[j] * f[j] }
+        pw.append(s / Double(max(1, e - i)))
+        i = e
+    }
+    pw.sort(by: >)
+    let top = pw.prefix(max(1, (pw.count + 1) / 2))
+    let speechRms = (top.reduce(0, +) / Double(top.count)).squareRoot()
+    var gain = min(maxGain, max(0.5, targetRms / max(speechRms, 1e-5)))
+    let abs = f.map { Swift.abs($0) }.sorted()
+    let p999 = abs[min(abs.count - 1, Int(Double(abs.count) * 0.999))]
+    if p999 * gain > 0.95 { gain = 0.95 / max(p999, 1e-5) }
+    return f.map { toInt16($0 * gain) }
+}
+
+/// ストリーミング用(Soniox): ハイパス + ゆっくり動く自動音量調整(1フレーム ±1dB まで)
+final class StreamingLeveler {
+    private var hp = HighPass()
+    private let vad = Vad()
+    private var speechPow: Double?
+    private var gain = 1.0
+    func process(_ pcm: [Int16]) -> [Int16] {
+        let f = hp.process(pcm.map { Double($0) / 32768 })
+        if vad.push(pcm).speech {
+            let p = f.reduce(0) { $0 + $1 * $1 } / Double(max(1, f.count))
+            speechPow = speechPow.map { $0 * 0.9 + p * 0.1 } ?? p
+        }
+        let want = speechPow.map { min(20, max(0.5, 0.1 / $0.squareRoot())) } ?? 1
+        gain = min(gain * 1.122, max(gain / 1.122, want))
+        return f.map { x -> Int16 in
+            var y = x * gain
+            if Swift.abs(y) > 0.9 { y = (y > 0 ? 1 : -1) * (0.9 + 0.1 * tanh((Swift.abs(y) - 0.9) / 0.1)) }
+            return toInt16(y)
+        }
+    }
+}
+
+/// 発話の切れ目で区切る。maxSec に達したら直近3秒で一番静かな位置で区切る。発話 0.3 秒未満の区間は送らない。
+final class Chunker {
+    let minSec: Double, maxSec: Double, silenceSec = 0.4, minSpeechSec = 0.3
+    private struct Frame { let pcm: [Int16]; let speech: Bool; let db: Double }
+    private var frames: [Frame] = []
+    private var samples = 0, silent = 0, startSample = 0
+    private let vad = Vad()
+    let onChunk: ([Int16], Double, Double) -> Void   // pcm, 開始秒, 発話率
+
+    init(minSec: Double, maxSec: Double, onChunk: @escaping ([Int16], Double, Double) -> Void) {
         self.minSec = minSec; self.maxSec = maxSec; self.onChunk = onChunk
     }
     func push(_ s: [Int16]) {
-        parts += s
-        if rms(s) < silenceRms { silent += s.count } else { silent = 0 }
-        let sec = Double(parts.count) / sampleRate
-        if (sec >= minSec && Double(silent) >= silenceSec * sampleRate) || sec >= maxSec { flush() }
+        let v = vad.push(s)
+        frames.append(Frame(pcm: s, speech: v.speech, db: v.levelDb))
+        samples += s.count
+        if v.speech { silent = 0 } else { silent += s.count }
+        let sec = Double(samples) / sampleRate
+        if sec >= minSec && Double(silent) >= silenceSec * sampleRate { flush() }
+        else if sec >= maxSec { flush(count: quietestCut()) }
     }
-    func flush() {
-        guard !parts.isEmpty else { return }
-        let pcm = parts
+    private func quietestCut() -> Int {
+        var acc = 0, best = frames.count - 1, bestDb = Double.infinity
+        var i = frames.count - 1
+        while i >= 1 {
+            acc += frames[i].pcm.count
+            if Double(acc) > 3 * sampleRate { break }
+            if frames[i].db < bestDb { bestDb = frames[i].db; best = i }
+            i -= 1
+        }
+        return best + 1
+    }
+    func flush(count: Int? = nil) {
+        guard !frames.isEmpty else { return }
+        let n = min(count ?? frames.count, frames.count)
+        let take = Array(frames.prefix(n))
+        frames.removeFirst(n)
+        let len = take.reduce(0) { $0 + $1.pcm.count }
+        let speechLen = take.reduce(0) { $0 + ($1.speech ? $1.pcm.count : 0) }
         let st = Double(startSample) / sampleRate
-        startSample += parts.count
-        parts = []; silent = 0
-        if rms(pcm) < silenceRms * 0.6 { return }   // ほぼ無音は送らない(課金節約)
-        onChunk(pcm, st)
+        startSample += len
+        samples -= len
+        silent = 0
+        for f in frames.reversed() { if f.speech { break }; silent += f.pcm.count }
+        if Double(speechLen) < minSpeechSec * sampleRate { return }
+        onChunk(take.flatMap { $0.pcm }, st, Double(speechLen) / Double(max(1, len)))
     }
 }
 

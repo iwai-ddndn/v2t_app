@@ -11,7 +11,7 @@
 <div class="bench">
   <p><a href="./" class="btn">← 文字起こしに戻る</a></p>
   <h2>文字起こし方式の比較検証</h2>
-  <p class="hint">同じ会議音声を複数の方式で文字起こしし、精度(CER=文字誤り率、低いほど良い)・処理時間・費用を比較します。APIキーはメイン画面の設定のものを使います。</p>
+  <p class="hint">「前処理あり」は、ライブと同じ処理(発話検出・音量正規化・用語ヒント・誤出力除去)をかけた結果です。「前処理なし」と比べると、改善の効果が分かります。<br>同じ会議音声を複数の方式で文字起こしし、精度(CER=文字誤り率、低いほど良い)・処理時間・費用を比較します。APIキーはメイン画面の設定のものを使います。</p>
 
   <h3>1. 音声ファイル</h3>
   <input type="file" id="file" accept="audio/*,video/*,.m4a,.mp3,.wav">
@@ -29,10 +29,13 @@
 
   <h3>4. 実行する方式</h3>
   <div class="row wrap" id="engines">
-    <label class="check"><input type="checkbox" value="openai:gpt-4o-mini-transcribe" checked> OpenAI mini-transcribe</label>
-    <label class="check"><input type="checkbox" value="openai:gpt-4o-transcribe" checked> OpenAI 4o-transcribe</label>
+    <label class="check"><input type="checkbox" value="openai:gpt-transcribe" checked> OpenAI gpt-transcribe</label>
+    <label class="check"><input type="checkbox" value="openai:gpt-transcribe:raw" checked> 同・前処理なし(比較用)</label>
+    <label class="check"><input type="checkbox" value="openai:gpt-4o-transcribe"> OpenAI 4o-transcribe</label>
+    <label class="check"><input type="checkbox" value="openai:gpt-4o-mini-transcribe"> OpenAI mini-transcribe</label>
     <label class="check"><input type="checkbox" value="openai:whisper-1"> OpenAI whisper-1</label>
     <label class="check"><input type="checkbox" value="soniox" checked> Soniox</label>
+    <label class="check"><input type="checkbox" value="soniox:raw"> Soniox・前処理なし</label>
   </div>
   <button id="run" class="primary">比較を実行</button>
   <p id="log" class="hint"></p>

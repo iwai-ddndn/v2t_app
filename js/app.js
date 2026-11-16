@@ -1,4 +1,4 @@
-import { openMic, RingBuffer, playPcm, TARGET_RATE } from './audio.js';
+import { openInput, RingBuffer, playPcm, TARGET_RATE, Vad, canCapturePcAudio } from './audio.js';
 import * as WebSpeech from './engines/webspeech.js';
 import * as OpenAI from './engines/openai.js';
 import * as Soniox from './engines/soniox.js';
@@ -7,11 +7,19 @@ import { fmtTime, toPlainText } from './util.js';
 
 const $ = (s) => document.querySelector(s);
 const DEFAULTS = {
-  engine: 'webspeech', openaiKey: '', openaiModel: 'gpt-4o-mini-transcribe', openaiBaseUrl: '',
+  engine: 'webspeech', openaiKey: '', openaiModel: OpenAI.DEFAULT_MODEL, openaiBaseUrl: '',
   chunkMin: 8, chunkMax: 20, summaryModel: 'gpt-5-mini', sonioxKey: '', sonioxModel: 'stt-rt-v5',
   diarize: false, fontSize: 18, ringMinutes: 10, yenPerUsd: 150, lang: 'ja-JP',
+  inputSource: 'mic', normalize: true, glossary: '', settingsVersion: 2,
 };
-const settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('v2t.settings') || '{}') };
+const stored = JSON.parse(localStorage.getItem('v2t.settings') || '{}');
+const settings = { ...DEFAULTS, ...stored };
+// v1 → v2: 旧既定モデルを最新の gpt-transcribe に、入力は「加工なし」に移行(保存済みの設定がある人だけ)
+if (Object.keys(stored).length && (stored.settingsVersion || 1) < 2) {
+  if (settings.openaiModel === 'gpt-4o-mini-transcribe') settings.openaiModel = OpenAI.DEFAULT_MODEL;
+  settings.inputSource = 'mic'; settings.normalize = true; settings.settingsVersion = 2;
+  localStorage.setItem('v2t.settings', JSON.stringify(settings));
+}
 const saveSettings = () => localStorage.setItem('v2t.settings', JSON.stringify(settings));
 
 const ENGINES = [
@@ -70,6 +78,12 @@ function addSegment(s) {
 }
 function scrollBottom() { const l = $('#list'); l.scrollTop = l.scrollHeight; }
 function setStatus(t) { $('#status').textContent = t; }
+function updateMeter(v) {
+  const bar = $('#meterBar');
+  if (!v) { bar.style.width = '0'; bar.classList.remove('speech'); return; }
+  bar.style.width = `${Math.max(0, Math.min(100, ((v.levelDb + 70) / 60) * 100))}%`;
+  bar.classList.toggle('speech', v.speech);
+}
 function updateCost() {
   let usd = 0;
   for (const v of Object.values(session.usage)) usd += (v.sec / 60) * v.rate + (v.usd || 0);
@@ -99,7 +113,21 @@ async function start() {
     engine = def.make(cb);
     if (engine.info.needsMic) {
       ring = ring || new RingBuffer(settings.ringMinutes * 60);
-      mic = await openMic((pcm) => { ring.push(pcm); engine.feed(pcm); });
+      const meterVad = new Vad();
+      let quietFrames = 0, warned = false;
+      mic = await openInput((pcm) => {
+        ring.push(pcm); engine.feed(pcm);
+        const v = meterVad.push(pcm);
+        updateMeter(v);
+        // 5秒以上ほぼ無音なら、置き方・音量のヒントを出す
+        quietFrames = v.levelDb < -55 ? quietFrames + 1 : 0;
+        if (quietFrames === 50 && !warned) { warned = true; setStatus('⚠ 音がほとんど入っていません。スマホをスピーカーに近づけるか、PCの音量を上げてください'); }
+      }, {
+        source: settings.inputSource,
+        onEnded: () => { if (running) setStatus('⚠ 音声の共有が終了しました。「停止」して再開してください'); },
+      });
+    } else if (settings.inputSource !== 'mic' && settings.inputSource !== 'mic-voice') {
+      setStatus('※ 内蔵認識はマイク入力のみ対応です(PC音声は OpenAI / Soniox で使えます)');
     }
     await engine.start();
   } catch (e) {
@@ -121,6 +149,7 @@ async function stop() {
   baseElapsed = elapsed(); running = false;
   clearInterval(tick);
   if (mic) { await mic.close(); mic = null; }
+  updateMeter(null);
   await engine.stop().catch(() => {});
   engine = null;
   $('#interim').textContent = '';
@@ -215,6 +244,11 @@ function init() {
     for (const el of form.elements) {
       if (!el.name) continue;
       if (el.type === 'checkbox') el.checked = !!settings[el.name]; else el.value = settings[el.name] ?? '';
+    }
+    // スマホでは PC 音声の取り込みはできないので選べないようにする
+    if (!canCapturePcAudio()) {
+      form.elements.inputSource.querySelectorAll('option[value^="pc"]').forEach((o) => { o.disabled = true; });
+      if (settings.inputSource.startsWith('pc')) form.elements.inputSource.value = 'mic';
     }
     renderHistory();
     $('#dlgSettings').showModal();

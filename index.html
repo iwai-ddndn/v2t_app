@@ -19,7 +19,10 @@
   <button id="btnSettings" class="icon" aria-label="設定">⚙︎</button>
 </header>
 
-<div id="status" class="status">停止中</div>
+<div class="statusbar">
+  <div class="meter" title="入力音量(緑=発話として検出中)"><div id="meterBar"></div></div>
+  <div id="status" class="status">停止中</div>
+</div>
 
 <main id="list" class="list" aria-live="polite">
   <p class="empty">「● 開始」で録音と文字起こしを始めます。<br>下の「◀ 1分前」などで直前の発言にすぐ戻れます。</p>
@@ -71,12 +74,25 @@
 <dialog id="dlgSettings">
   <form method="dialog" id="formSettings">
     <h3>設定</h3>
+    <fieldset><legend>音声の取り込み</legend>
+      <label>音源 <select name="inputSource">
+        <option value="mic">マイク・加工なし(スピーカー越し・会議室向け)</option>
+        <option value="mic-voice">マイク・ノイズ抑制あり(自分の声中心)</option>
+        <option value="pc">PCの音声を直接(PCのChrome/Edge・最高精度)</option>
+        <option value="pc+mic">PCの音声 + マイク(自分の声も残す)</option>
+      </select></label>
+      <label class="check"><input name="normalize" type="checkbox"> 小さい声を自動で大きくする(推奨)</label>
+      <label>用語・固有名詞(「、」か改行で区切る)
+        <textarea name="glossary" rows="3" placeholder="例: 岩井、DDN、v2t、四半期レビュー、KPI"></textarea></label>
+      <p class="hint">「PCの音声」を選ぶと、開始時に共有する画面(会議のタブなど)を聞かれます。「音声を共有」をオンにしてください。スピーカー→マイクを経由しないので、最も正確です。</p>
+    </fieldset>
     <fieldset><legend>OpenAI(ChatGPT Pro の API クレジット特典が使えます)</legend>
       <label>APIキー <input name="openaiKey" type="password" autocomplete="off" placeholder="sk-..."></label>
       <label>文字起こしモデル <select name="openaiModel">
-        <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe($0.003/分・推奨)</option>
-        <option value="gpt-4o-transcribe">gpt-4o-transcribe($0.006/分・高精度)</option>
-        <option value="whisper-1">whisper-1($0.006/分)</option>
+        <option value="gpt-transcribe">gpt-transcribe($0.0045/分・最新・推奨)</option>
+        <option value="gpt-4o-transcribe">gpt-4o-transcribe($0.006/分)</option>
+        <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe($0.003/分・最安)</option>
+        <option value="whisper-1">whisper-1($0.006/分・旧)</option>
       </select></label>
       <label>区切り 最短/最長(秒) <span class="row"><input name="chunkMin" type="number" min="3" max="30"> <input name="chunkMax" type="number" min="5" max="60"></span></label>
       <label>要約モデル <input name="summaryModel" placeholder="gpt-5-mini"></label>

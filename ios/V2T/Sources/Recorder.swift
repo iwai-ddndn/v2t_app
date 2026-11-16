@@ -27,6 +27,8 @@ final class SettingsStore: ObservableObject {
     @Published var openaiKey: String { didSet { Keychain.set(openaiKey, "openaiKey") } }
     @Published var sonioxKey: String { didSet { Keychain.set(sonioxKey, "sonioxKey") } }
     @Published var openaiModel: String { didSet { d.set(openaiModel, forKey: "openaiModel") } }
+    @Published var glossary: String { didSet { d.set(glossary, forKey: "glossary") } }
+    @Published var normalize: Bool { didSet { d.set(normalize, forKey: "normalize") } }
     @Published var summaryModel: String { didSet { d.set(summaryModel, forKey: "summaryModel") } }
     @Published var sonioxModel: String { didSet { d.set(sonioxModel, forKey: "sonioxModel") } }
     @Published var diarize: Bool { didSet { d.set(diarize, forKey: "diarize") } }
@@ -40,7 +42,12 @@ final class SettingsStore: ObservableObject {
         engine = EngineKind(rawValue: d.string(forKey: "engine") ?? "") ?? .openai
         openaiKey = Keychain.get("openaiKey")
         sonioxKey = Keychain.get("sonioxKey")
-        openaiModel = d.string(forKey: "openaiModel") ?? "gpt-4o-mini-transcribe"
+        // 旧既定(mini)は最新の gpt-transcribe に移行
+        let storedModel = d.string(forKey: "openaiModel")
+        let oldVersion = d.integer(forKey: "settingsVersion") < 2
+        if let m = storedModel, !(oldVersion && m == "gpt-4o-mini-transcribe") { openaiModel = m } else { openaiModel = "gpt-transcribe" }
+        glossary = d.string(forKey: "glossary") ?? ""
+        normalize = d.object(forKey: "normalize") as? Bool ?? true
         summaryModel = d.string(forKey: "summaryModel") ?? "gpt-5-mini"
         sonioxModel = d.string(forKey: "sonioxModel") ?? "stt-rt-v5"
         diarize = d.bool(forKey: "diarize")
@@ -49,6 +56,8 @@ final class SettingsStore: ObservableObject {
         fontSize = d.object(forKey: "fontSize") as? Double ?? 18
         ringMinutes = d.object(forKey: "ringMinutes") as? Int ?? 10
         yenPerUsd = d.object(forKey: "yenPerUsd") as? Double ?? 150
+        d.set(openaiModel, forKey: "openaiModel")   // init 中は didSet が呼ばれないので明示的に保存
+        d.set(2, forKey: "settingsVersion")
     }
 }
 
@@ -130,10 +139,12 @@ final class Recorder: ObservableObject {
         switch settings.engine {
         case .openai:
             eng = OpenAIEngine(apiKey: settings.openaiKey, model: settings.openaiModel, lang: lang,
+                               glossary: settings.glossary, normalize: settings.normalize,
                                minSec: settings.chunkMin, maxSec: settings.chunkMax, offset: base, callbacks: cb)
         case .soniox:
             eng = SonioxEngine(apiKey: settings.sonioxKey, model: settings.sonioxModel, lang: lang,
-                               diarize: settings.diarize, now: now, callbacks: cb)
+                               diarize: settings.diarize, glossary: settings.glossary, normalize: settings.normalize,
+                               now: now, callbacks: cb)
         }
         do {
             try await eng.start()
@@ -213,7 +224,7 @@ final class Recorder: ObservableObject {
     func play(last sec: Double) {
         guard let ring, ring.filled > 0 else { status = "まだ音声がありません(録音中のみ聞き直せます)"; return }
         player?.stop()
-        player = try? AVAudioPlayer(data: encodeWav(ring.last(seconds: sec)))
+        player = try? AVAudioPlayer(data: encodeWav(normalizeGain(ring.last(seconds: sec))))
         player?.play()
     }
     func stopPlaying() { player?.stop() }

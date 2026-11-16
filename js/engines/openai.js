@@ -1,85 +1,131 @@
-// OpenAI 音声認識 API(区切り送信型)。無音位置で 8〜20 秒に区切って送る。
+// OpenAI 音声認識 API(区切り送信型)。発話の切れ目で 8〜20 秒に区切って送る。
 // ChatGPT Pro の「API クレジット特典」を使えば実質無料枠内で運用可能。
-import { Chunker, encodeWav, TARGET_RATE } from '../audio.js';
+import { Chunker, encodeWav, normalizeGain, TARGET_RATE } from '../audio.js';
 
 export const MODELS = {
-  'gpt-4o-mini-transcribe': { name: 'OpenAI gpt-4o-mini-transcribe', costPerMin: 0.003 },
+  'gpt-transcribe': { name: 'OpenAI gpt-transcribe', costPerMin: 0.0045 },
   'gpt-4o-transcribe': { name: 'OpenAI gpt-4o-transcribe', costPerMin: 0.006 },
+  'gpt-4o-mini-transcribe': { name: 'OpenAI gpt-4o-mini-transcribe', costPerMin: 0.003 },
   'whisper-1': { name: 'OpenAI whisper-1', costPerMin: 0.006 },
 };
+export const DEFAULT_MODEL = 'gpt-transcribe';
 
-export async function transcribeWav(blob, { apiKey, model, lang = 'ja', prompt = '', baseUrl, signal }) {
+/** 用語リスト(改行・読点・カンマ区切り)を API に渡せる形に整える */
+export function parseGlossary(text) {
+  return [...new Set(String(text || '').split(/[\n,、，]+/).map((s) => s.replace(/[<>\r\n]/g, '').trim()).filter(Boolean))]
+    .map((s) => s.slice(0, 60)).slice(0, 100);
+}
+
+// gpt-transcribe の新しい項目(languages[] / keywords[])が受け付けられなかった場合に、旧形式へ自動で切り替える
+let legacyFields = false;
+export const _resetLegacy = () => { legacyFields = false; };
+
+export async function transcribeWav(blob, { apiKey, model, lang = 'ja', prompt = '', keywords = [], baseUrl, signal }) {
+  const isNew = model.startsWith('gpt-transcribe') && !legacyFields;
   const fd = new FormData();
   fd.append('file', blob, 'chunk.wav');
   fd.append('model', model);
-  fd.append('language', lang);
   fd.append('response_format', 'json');
-  if (prompt) fd.append('prompt', prompt);
+  if (isNew) {
+    fd.append('languages[]', lang);
+    keywords.forEach((k) => fd.append('keywords[]', k));
+    if (prompt) fd.append('prompt', prompt);
+  } else {
+    fd.append('language', lang);
+    // 旧モデルは用語を「前の発言」の形でプロンプトに入れるのが効果的(Whisper のプロンプトは直前の書き起こしを想定している)
+    const p = (keywords.length ? `${keywords.join('、')}。` : '') + prompt;
+    if (p) fd.append('prompt', p.slice(-800));
+  }
   const res = await fetch(`${baseUrl || 'https://api.openai.com/v1'}/audio/transcriptions`, {
     method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: fd, signal,
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 300);
+    if (isNew && res.status === 400 && /language|keyword/i.test(body)) {
+      legacyFields = true;
+      return transcribeWav(blob, { apiKey, model, lang, prompt, keywords, baseUrl, signal });
+    }
+    const err = new Error(`OpenAI ${res.status}: ${body}`);
+    err.status = res.status;
+    throw err;
+  }
   const j = await res.json();
   return (j.text || '').trim();
 }
 
 export function create(settings, cb) {
-  const model = settings.openaiModel || 'gpt-4o-mini-transcribe';
+  const model = settings.openaiModel || DEFAULT_MODEL;
   const info = { id: 'openai', name: MODELS[model]?.name || model, costPerMin: MODELS[model]?.costPerMin ?? 0.006, needsMic: true };
-  let seq = 0, nextToEmit = 0; const done = new Map(); let pending = 0; let context = '';
-  let usageSec = 0;
+  const keywords = parseGlossary(settings.glossary);
+  const lang = (settings.lang || 'ja-JP').slice(0, 2);
+  let pending = 0; let context = ''; let usageSec = 0;
+  // 直前の書き起こしを次の区間のプロンプトに使うため、区間は 1 本ずつ順番に送る
+  let queue = Promise.resolve();
 
-  const emitInOrder = () => {
-    while (done.has(nextToEmit)) {
-      const r = done.get(nextToEmit); done.delete(nextToEmit); nextToEmit++;
-      if (r && r.text) { cb.onSegment({ t: r.t, text: r.text }); context = (context + r.text).slice(-200); }
+  const process = async (pcm, startSec, meta) => {
+    const t = cb.offset + startSec;
+    let text = null;
+    for (let attempt = 0; attempt < 3 && text == null; attempt++) {
+      try {
+        const raw = await transcribeWav(encodeWav(settings.normalize === false ? pcm : normalizeGain(pcm)), {
+          apiKey: settings.openaiKey, model, lang, prompt: context, keywords, baseUrl: settings.openaiBaseUrl,
+        });
+        text = cleanup(raw, meta);
+      } catch (e) {
+        if (e.status === 401) { cb.onStatus('APIキーが正しくありません(設定を確認してください)'); text = '[⚠ APIキーエラー]'; break; }
+        if (attempt === 2) { cb.onStatus(`送信失敗: ${e.message}`); text = '[⚠ この区間は文字起こし失敗]'; }
+        else await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
     }
+    pending--;
+    if (text) { cb.onSegment({ t, text }); if (!text.startsWith('[⚠')) context = (context + text).slice(-200); }
     cb.onInterim(pending ? `…文字起こし中(${pending}件)` : '');
   };
 
-  const send = async (pcm, startSec, attempt = 0) => {
-    const id = attempt === 0 ? seq++ : pcm.__id;
-    pcm.__id = id;
-    if (attempt === 0) { pending++; usageSec += pcm.length / TARGET_RATE; }
-    cb.onInterim(`…文字起こし中(${pending}件)`);
-    try {
-      const text = await transcribeWav(encodeWav(pcm), {
-        apiKey: settings.openaiKey, model, lang: (settings.lang || 'ja-JP').slice(0, 2), prompt: context, baseUrl: settings.openaiBaseUrl,
-      });
-      done.set(id, { t: cb.offset + startSec, text: cleanup(text) });
-    } catch (e) {
-      if (attempt < 2) { setTimeout(() => send(pcm, startSec, attempt + 1), 1500 * (attempt + 1)); return; }
-      cb.onStatus(`送信失敗: ${e.message}`);
-      done.set(id, { t: cb.offset + startSec, text: '[⚠ この区間は文字起こし失敗]' });
-    }
-    pending--; emitInOrder();
-  };
-
   const chunker = new Chunker({
-    minSec: Number(settings.chunkMin || 8), maxSec: Number(settings.chunkMax || 20), onChunk: (pcm, s) => send(pcm, s),
+    minSec: Number(settings.chunkMin || 8), maxSec: Number(settings.chunkMax || 20),
+    onChunk: (pcm, s, meta) => {
+      pending++; usageSec += pcm.length / TARGET_RATE;
+      cb.onInterim(`…文字起こし中(${pending}件)`);
+      queue = queue.then(() => process(pcm, s, meta));
+    },
   });
 
   return {
     info,
     async start() {
       if (!settings.openaiKey) throw new Error('OpenAI APIキーを設定してください');
-      cb.onStatus(`録音中(${info.name}・約${settings.chunkMin || 8}〜${settings.chunkMax || 20}秒ごとに反映)`);
+      cb.onStatus(`録音中(${info.name}・発話の切れ目ごとに反映)`);
     },
     feed(int16) { chunker.push(int16); },
     flushNow() { chunker.flush(); },
     async stop() {
       chunker.flush();
-      const t0 = Date.now();
-      while (pending > 0 && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 200));
+      await Promise.race([queue, new Promise((r) => setTimeout(r, 30000))]);
       cb.onUsage(usageSec);
     },
   };
 }
 
-// Whisper系が無音で出しがちな定型ハルシネーションを除去
-const HALLUCINATIONS = [/ご視聴ありがとうございました。?/g, /チャンネル登録(よろしくお願いします|お願いします)。?/g, /^\s*(はい|ん)\s*。?\s*$/];
-export function cleanup(text) {
+/**
+ * Whisper 系モデルは、無音や雑音から定型文をでっち上げることがある(ハルシネーション)。
+ * 研究(Barański et al. 2025 の "Bag of Hallucinations")にならい、頻出フレーズの除去と、
+ * 同じ語の無限ループの圧縮を行う。発話がほとんど無い区間の短い出力は捨てる。
+ */
+const BAG = [
+  /ご視聴(いただき)?ありがとうございました。?/g, /最後までご(視聴|覧)いただき(ありがとうございました|ありがとうございます)。?/g,
+  /チャンネル登録(よろしくお願いします|お願いします|をお願いします)。?/g, /高評価(よろしくお願いします|お願いします)。?/g,
+  /次回(も)?お楽しみに。?/g, /(字幕|翻訳)(は|:|：).{0,20}(が担当しました|によるもの)。?/g,
+];
+export function cleanup(text, { speechRatio = 1 } = {}) {
   let t = text;
-  for (const re of HALLUCINATIONS) t = t.replace(re, '');
-  return t.trim();
+  for (const re of BAG) t = t.replace(re, '');
+  // 同じフレーズが 4 回以上連続したら 1 回にまとめる(ループ型の誤出力)
+  t = t.replace(/(.{1,20}?)\1{3,}/g, '$1');
+  t = t.trim();
+  if (/^[\s。、.,!?！？・…]*$/.test(t)) return '';
+  // 発話がほとんど無い区間からの短い出力は誤出力の可能性が高い
+  if (speechRatio < 0.1 && t.length <= 12) return '';
+  if (/^(はい|ん|うん|えー|あー)[。、]?$/.test(t) && speechRatio < 0.3) return '';
+  return t;
 }

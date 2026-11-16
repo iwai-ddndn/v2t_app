@@ -3,6 +3,8 @@ import Foundation
 /// Soniox リアルタイム(WebSocket)。1〜2秒で逐次表示。切断時は自動再接続。
 final class SonioxEngine: TranscriptionEngine {
     private let apiKey: String, model: String, lang: String, diarize: Bool
+    private let terms: [String]
+    private let leveler: StreamingLeveler?
     private let urlString = "wss://stt-rt.soniox.com/transcribe-websocket"
     private let cb: EngineCallbacks
     private let now: () -> Double
@@ -17,8 +19,11 @@ final class SonioxEngine: TranscriptionEngine {
     private var finished = false
     private var billedSec = 0.0
 
-    init(apiKey: String, model: String, lang: String, diarize: Bool, now: @escaping () -> Double, callbacks: EngineCallbacks) {
+    init(apiKey: String, model: String, lang: String, diarize: Bool, glossary: String, normalize: Bool,
+         now: @escaping () -> Double, callbacks: EngineCallbacks) {
         self.apiKey = apiKey; self.model = model; self.lang = lang; self.diarize = diarize; self.now = now; self.cb = callbacks
+        self.terms = parseGlossary(glossary)
+        self.leveler = normalize ? StreamingLeveler() : nil   // 小さい声を聞き取りやすい音量にそろえてから送る
     }
 
     var displayName: String { "Soniox \(model)" }
@@ -34,17 +39,19 @@ final class SonioxEngine: TranscriptionEngine {
         let t = URLSession.shared.webSocketTask(with: url)
         lock.withLock { task = t; finished = false; streamOffset = now() }
         t.resume()
-        let cfg: [String: Any] = [
+        var cfg: [String: Any] = [
             "api_key": apiKey, "model": model,
             "audio_format": "pcm_s16le", "sample_rate": Int(sampleRate), "num_channels": 1,
             "language_hints": [lang], "enable_endpoint_detection": true, "enable_speaker_diarization": diarize,
         ]
+        if !terms.isEmpty { cfg["context"] = ["terms": terms] }   // 用語ヒント
         let json = String(data: try JSONSerialization.data(withJSONObject: cfg), encoding: .utf8)!
         try await t.send(.string(json))
         receive(t)
     }
 
-    func feed(_ pcm: [Int16]) {
+    func feed(_ raw: [Int16]) {
+        let pcm = leveler?.process(raw) ?? raw   // オーディオスレッドからのみ呼ばれる
         let t = lock.withLock { () -> URLSessionWebSocketTask? in
             billedSec += Double(pcm.count) / sampleRate
             return task
